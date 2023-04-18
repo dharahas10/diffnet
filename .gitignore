@@ -17,3 +17,6 @@ __pycache__
 # project
 /data
 logs
+
+src/test.py
+memory_reports
