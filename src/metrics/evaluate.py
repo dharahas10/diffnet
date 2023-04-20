@@ -37,6 +37,51 @@ def evaluate_hit_rate_and_ndcg(user_index_dict, true_scores, predict_scores, top
         user_hit_rates.append(np.mean(relevance_scores))
     
     return np.mean(user_hit_rates), np.mean(user_ndcg_values)
+
+
+def get_dcg(idx):
+    return math.log(2) / math.log(idx+2)
+
+def get_idcg(length):
+    idcg = 0.0
+    for i in range(length):
+        idcg += math.log(2)/math.log(i+2)
+    return idcg
+
+def evaluate_hit_rate_and_ndcg_2(user_index_dict, positive_ratings, negative_ratings_user_dict, top_k=5):
+    
+    user_ndcg_values = []
+    user_hit_rates = []
+    
+    for user, item_indices in user_index_dict.items():
+        user_positive_ratings = list(np.concatenate(positive_ratings[item_indices]))
+        user_positive_ratings_length = len(user_positive_ratings)
+        target_length = min(user_positive_ratings_length, top_k)
+        
+        user_all_predict_ratings= user_positive_ratings + list(negative_ratings_user_dict[user])
+        
+        sort_index = np.argsort(user_all_predict_ratings)[::-1]
+        
+        tmp_user_hr_list = []
+        tmp_user_dcg_list = []
+        for idx in range(top_k):
+            rank = sort_index[idx]
+            if rank >= user_positive_ratings_length: continue
+            tmp_user_hr_list.append(1.0)
+            tmp_user_dcg_list.append(get_dcg(idx))
+        
+        idcg_val = get_idcg(target_length)
+        
+        user_hit_rates.append(np.sum(tmp_user_hr_list)/ target_length)
+        user_ndcg_values.append(np.sum(tmp_user_dcg_list)/ idcg_val)
+    
+    return np.mean(user_hit_rates), np.mean(user_ndcg_values)
+                
+            
+        
+        
+        
+        
         
         
     

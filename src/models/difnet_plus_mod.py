@@ -7,7 +7,7 @@ from util.tf_helper import normalize_with_moments
 
 log = logging.getLogger(__name__)
 
-fp = open("report_diffnet_mod.log", "w+")
+fp = open("memory_reports/diffnet_mod.log", "w+")
 from memory_profiler import profile
 
 
@@ -28,33 +28,20 @@ class DiffnetPlusMod(tf.keras.Model):
         self.user_links = user_links
         self.item_links = item_links
         
-        
-        ### common variables and layers
-        ## variables
-        
-        ## layers
-        
-        ### user related variables and layers
-        
+        #### user related variables and layers
         ### describe variables
-        
         ## node attention
         # consumed items
         self.user_consumed_items_sparse_values = tf.Variable(
             tf.random_normal_initializer(stddev=self.low_att_std)(shape=[len(self.user_consumed_items['indices'])], dtype=tf.float32),
             trainable=True, name="user_consumed_items_trainable_values_or_weights")
         # neighbor users
-        self.user_neighbors_sparse_values = tf.Variable(
-            tf.random_normal_initializer(stddev=self.low_att_std)(shape=[len(self.user_links['indices'])], dtype=tf.float32),
-            trainable=True, name="user_neighbors_sparse_values")
-        
+        self.user_neighbors_sparse_values = tf.constant(self.user_links['values'], dtype=tf.float32, shape=[len(self.user_links['values'])], name='user_neighbors_sparse_values')
         
         ## describe layers
-        
         # reduce dimensions layer
         self.user_embeddings_reduce_dims = tf.keras.layers.Dense(self.dims, activation=tf.keras.activations.sigmoid, name="user_embeddings_reduce_dims")
-        
-        ## Embedding layer
+        # Embedding layer
         self.user_fusion_layer = FusionLayer(name="user_fusion_layer")
         
         ## Node attention
@@ -81,9 +68,7 @@ class DiffnetPlusMod(tf.keras.Model):
             trainable=True, name="item_consumed_users_trainable_values_or_weights")
         
         # neighbor items
-        self.item_neighbors_sparse_values = tf.Variable(
-            tf.random_normal_initializer(stddev=self.low_att_std)(shape=[len(self.item_links['indices'])], dtype=tf.float32),
-            trainable=True, name="item_neighbors_sparse_values")
+        self.item_neighbors_sparse_values = tf.constant(self.item_links['values'], dtype=tf.float32, shape=[len(self.item_links['values'])], name="item_neighbors_sparse_values")
         
         
         ## describe layers
@@ -107,7 +92,7 @@ class DiffnetPlusMod(tf.keras.Model):
         self.item_neighbors_graph_attention_layer_2 = tf.keras.layers.Dense(1, activation=tf.nn.leaky_relu, name="item_neighbors_graph_attention_layer_2")
         
     
-    @profile(stream=fp)
+    # @profile(stream=fp)
     # @tf.function
     def call(self, inputs, training=False):
         user_input, item_input = inputs
@@ -225,7 +210,8 @@ class DiffnetPlusMod(tf.keras.Model):
             item_embeddings_from_consumed_users = tf.sparse.sparse_dense_matmul(item_consumed_users_sparse_attention_matrix, current_user_gcn_embeddings)
             
             # compute attention embeddings for items based on users
-            item_consumed_users_graph_attention_embeddings = self.item_consumed_users_graph_attention_layer_1(item_embeddings_from_consumed_users)
+            item_consumed_users_graph_attention_embeddings = tf.concat([current_item_gcn_embeddings, item_embeddings_from_consumed_users], 1)
+            item_consumed_users_graph_attention_embeddings = self.item_consumed_users_graph_attention_layer_1(item_consumed_users_graph_attention_embeddings)
             item_consumed_users_graph_attention_embeddings = self.item_consumed_users_graph_attention_layer_2(item_consumed_users_graph_attention_embeddings)
             item_consumed_users_graph_attention_embeddings = tf.math.exp(item_consumed_users_graph_attention_embeddings) + 0.7 # TODO check bias weight later
             

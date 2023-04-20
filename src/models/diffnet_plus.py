@@ -99,7 +99,7 @@ class DiffnetPlus(tf.keras.Model):
     
     # @tf.function
     
-    @profile(stream=fp)
+    # @profile(stream=fp)
     def call(self, inputs, training=False):
         user_input, item_input = inputs
         ## user embeddings

@@ -1,3 +1,4 @@
+import gc
 import logging
 import logging.config
 import os
@@ -5,12 +6,13 @@ import sys
 import time
 from datetime import datetime
 
+import numpy as np
 import tensorflow as tf
 
-from metrics.evaluate import evaluate_hit_rate_and_ndcg
+from metrics.evaluate import evaluate_hit_rate_and_ndcg, evaluate_hit_rate_and_ndcg_2
 from models.diffnet_plus import DiffnetPlus
 from models.difnet_plus_mod import DiffnetPlusMod
-from util.data_module import DataModule
+from util.data_module_v2 import DataModule
 
 LOG_DIR = "./logs"
 
@@ -33,8 +35,11 @@ fp = open("memory_reports/main.log", "w+")
 from memory_profiler import profile
 
 
-@profile(stream=fp)
+# @profile(stream=fp)
+# @tf.function
 def train_epoch_batch(model, optimizer, epoch_loss_avg, input_users, input_items, label_ratings):
+    log = logging.getLogger(__name__)
+    
     with tf.GradientTape() as tape:
         y_predict = model([input_users, input_items], training=True)
         #compute loss
@@ -45,56 +50,45 @@ def train_epoch_batch(model, optimizer, epoch_loss_avg, input_users, input_items
     epoch_loss_avg.update_state(loss_value)
     del y_predict, grads
 
-@profile(stream=fp)
-def train_epoch(epoch, model, optimizer, data_module):
+# @profile(stream=fp)
+# @tf.function
+def train_epoch(epoch, model, optimizer, epoch_loss_avg, data_module):
     log = logging.getLogger(__name__)
-    epoch_loss_avg = tf.keras.metrics.Mean()
-    start_time = time.time()
+    
     for step, (input_users, input_items, label_ratings) in enumerate(data_module.train_data_batch_generator(), start=1):
-        log.info(f"Current epoch: {epoch} and step: {step}")
+        # log.info(f"Current epoch: {epoch} and step: {step} and GC collected: {gc.collect()} count: {gc.get_count()}")
+        # log.info(f"Current epoch: {epoch} and step: {step}")
         train_epoch_batch(model, optimizer, epoch_loss_avg, input_users, input_items, label_ratings) # type: ignore
-    epoch_time = time.time() - start_time
 
 
-
-    # validation
-    validation_loss_avg = tf.keras.metrics.Mean()
-    validation_input_users, validation_input_items, validation_label_ratings, validation_user_index_dict = data_module.get_validation_data()
-    validation_y_predict = model([validation_input_users, validation_input_items])
-    validation_loss_value = tf.nn.l2_loss(validation_label_ratings-validation_y_predict, name="validation_loss")
-    validation_loss_avg.update_state(validation_loss_value)
-
-    # metrics hit_rate and ndcg
-    hit_rate, ndcg = evaluate_hit_rate_and_ndcg(validation_user_index_dict, validation_label_ratings, validation_y_predict.numpy())
-
-    log.info(f"Epoch: {epoch}: Loss: {epoch_loss_avg.result()} Validation Loss: {validation_loss_avg.result()}  Validation HR: {hit_rate} Validation NDCG: {ndcg} Time Elapsed:{epoch_time}")
-
-
-@profile(stream=fp)
+# @profile(stream=fp)
 def main():
     ## hyperparameter
-    dims=300
-    gcn_layers = 2
-    epochs=1
-    batch_size=32
-    top_k=20
+    dims=64
+    gcn_layers = 3
+    epochs=500
+    batch_size=512
+    top_k=5
+    num_negatives=8
+    num_evaluate=1000
+    learning_rate=0.005
     log = logging.getLogger(__name__)
     log.info("Diffnet model training started")
 
-    data_dir = "./data/yelp_10"
+    data_dir = "./data/yelp_20"
     if not os.path.isdir(data_dir):
         log.error("Data directory not found")
         sys.exit()
 
     # load data
-    log.info("Loading dataset")
+    log.info(f"Loading dataset for dir: {data_dir}")
 
-    data_module = DataModule(data_dir, batch_size=batch_size)
+    data_module = DataModule(data_dir,num_negatives=num_negatives, num_evaluate=num_evaluate, batch_size=batch_size)
     data_module.load()
-
+    log.info("Data loaded successful!!!!!!")
     train_data= data_module.train_data
-    log.info("Data loaded !!!!!!")
-    model = DiffnetPlus(gcn_layers=gcn_layers,
+
+    model = DiffnetPlusMod(gcn_layers=gcn_layers,
                         dims=dims,
                         num_users=len(data_module.user_map),
                         num_items=len(data_module.item_map),
@@ -107,23 +101,53 @@ def main():
 
 
     # optimizer
-    optimizer = tf.keras.optimizers.Adam(learning_rate=0.001)
+    optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
     ## train the model
-    for epoch in range(epochs):
-        train_epoch(epoch, model, optimizer, data_module) # type: ignore
+    for epoch in range(1, epochs+1):
+        epoch_loss_avg = tf.keras.metrics.Mean()
+        start_time = time.time()
+        train_epoch(epoch, model, optimizer, epoch_loss_avg, data_module) # type: ignore
+        epoch_time = time.time() - start_time
+
+        # validation 
+        validation_loss_avg = tf.keras.metrics.Mean()
+        validation_input_users, validation_input_items, validation_label_ratings = data_module.get_validation_data()
+        validation_y_predict = model([validation_input_users, validation_input_items])
+        validation_loss_value = tf.nn.l2_loss(validation_label_ratings-validation_y_predict, name="validation_loss")
+        validation_loss_avg.update_state(validation_loss_value)
+
+        # metrics hit_rate and ndcg
+        # hit_rate, ndcg = evaluate_hit_rate_and_ndcg(validation_user_index_dict, validation_label_ratings, validation_y_predict.numpy())
+
+        # test
+        test_loss_avg = tf.keras.metrics.Mean()
+        test_input_users, test_input_items, test_label_ratings, test_user_index_dict = data_module.get_test_data_positive()
+        test_y_predict = model([test_input_users, test_input_items])
+        test_loss_value = tf.nn.l2_loss(test_label_ratings-test_y_predict, name="test_loss")
+        test_loss_avg.update_state(test_loss_value)
+
+        test_negative_predictions_user_dict = {}
+        for input_users, input_items, user_batch_list in data_module.get_test_data_negative():
+            negative_predictions = model([input_users, input_items])
+            negative_predictions_user_index = np.reshape(negative_predictions, (-1,num_evaluate))
+
+            for index, user in enumerate(user_batch_list):
+                test_negative_predictions_user_dict[user] = negative_predictions_user_index[index]
+
+        hit_rate_5, ndcg_5 = evaluate_hit_rate_and_ndcg_2(test_user_index_dict, test_y_predict.numpy(), test_negative_predictions_user_dict, top_k=5)
+        hit_rate_10, ndcg_10 = evaluate_hit_rate_and_ndcg_2(test_user_index_dict, test_y_predict.numpy(), test_negative_predictions_user_dict, top_k=10)
+        hit_rate_15, ndcg_15 = evaluate_hit_rate_and_ndcg_2(test_user_index_dict, test_y_predict.numpy(), test_negative_predictions_user_dict, top_k=15)
 
 
-    # test
-    test_loss_avg = tf.keras.metrics.Mean()
-    test_input_users, test_input_items, test_label_ratings, test_user_index_dict = data_module.get_test_data()
-    test_y_predict = model([test_input_users, test_input_items])
-    test_loss_value = tf.nn.l2_loss(test_label_ratings-test_y_predict, name="test_loss")
-    test_loss_avg.update_state(test_loss_value)
+        # # metrics hit_rate and ndcg
+        # hit_rate, ndcg = evaluate_hit_rate_and_ndcg(test_user_index_dict, test_label_ratings, test_y_predict, top_k=top_k)
+        # log.info(f"Test Loss: {test_loss_avg.result()}  Test HR: {hit_rate} Test NDCG: {ndcg}")
 
-    # metrics hit_rate and ndcg
-    hit_rate, ndcg = evaluate_hit_rate_and_ndcg(test_user_index_dict, test_label_ratings, test_y_predict.numpy(), top_k=top_k)
-    log.info(f"Test Loss: {test_loss_avg.result()}  Test HR: {hit_rate} Test NDCG: {ndcg}")
+        log.info(f"Epoch: {epoch}: Time Elapsed:{epoch_time} Loss: {epoch_loss_avg.result()} Validation Loss: {validation_loss_avg.result()}  Test loss: {test_loss_avg.result()}")
+        log.info(f"\t Test HR(5): {hit_rate_5}\tTest NDCG(): {ndcg_5}")
+        log.info(f"\t Test HR(10): {hit_rate_10}\tTest NDCG(): {ndcg_10}")
+        log.info(f"\t Test HR(15): {hit_rate_15}\tTest NDCG(): {ndcg_15}")
 
 if __name__ == "__main__":
     # setup logging

@@ -13,9 +13,11 @@ from data.key_type import KeyType
 log = logging.getLogger(__name__)
 
 class DataModule:
-    def __init__(self, data_dir, batch_size=32):
+    def __init__(self, data_dir, num_negatives=8,num_evaluate=1000, batch_size=32):
         self.data_dir = data_dir
         self.batch_size = batch_size
+        self.num_negatives = num_negatives
+        self.num_evaluate = num_evaluate
 
     def load(self):
 
@@ -72,9 +74,12 @@ class DataModule:
         ratings_by_user = defaultdict(list)
         user_consumed_items = defaultdict(list)
         item_consumed_users = defaultdict(list)
+        user_items_dict = defaultdict(list)
         with open(f"{self.data_dir}/{dataset_type.value}.ratings", "r") as f:
             for line in f:
                 user, item, rating = [int(x.strip()) for x in line.strip().split(",")]
+                # user -> items dict
+                user_items_dict[user].append(item)
                 # add user, item , rating info to ratings
                 ratings_by_user[user].append((item, rating))
                 # if item1, item3 is rated by user1 then user_consumed_items is {user1: [item1, item3 ]}
@@ -106,7 +111,20 @@ class DataModule:
         # sort each user's items
         for value in ratings_by_user.values():
             value.sort(key=lambda v:v[0])
+            
+        # add negatives
+        num_negatives = self.num_negatives
+        if dataset_type==DatasetType.Test:
+            num_negatives = self.num_evaluate
         
+        user_negative_items_dict= defaultdict(list)
+        num_items = len(self.item_map)
+        for user, items in user_items_dict.items():
+            for _ in range(num_negatives):
+                j = np.random.randint(num_items)
+                if j in items:
+                    j = np.random.randint(num_items)
+                user_negative_items_dict[user].append(j)
         return {
             'ratings_by_user': ratings_by_user,
             'user_consumed_items': {
@@ -116,40 +134,20 @@ class DataModule:
             'item_consumed_items': {
                 'indices': item_consumed_users_indices,
                 'values': item_consumed_users_values
-            }
+            },
+            'user_items_dict': user_items_dict,
+            'user_negative_items_dict': user_negative_items_dict
         }
-    
-    def get_training_batch(self, batch_index: int=0):
-        num_users = len(self.user_map)
-        
-        batch_users = list(range(batch_index*self.batch_size, (batch_index+1)*self.batch_size))
-        input_users = []
-        input_items = []
-        label_ratings = []
-        ratings_by_user = self.train_data['ratings_by_user']
-        for user in batch_users:
-            if user not in ratings_by_user:
-                continue
-            input_users.append(user)
-            input_items.append(ratings_by_user[user][0])
-            label_ratings.append(ratings_by_user[user][1])
-        
-        input_users = np.reshape(input_users, [-1,1])
-        input_items = np.reshape(input_items, [-1,1])
-        label_ratings = np.reshape(label_ratings, [-1,1])
-        
-        # next batch index
-        next_batch_index = batch_index+1 if batch_users[-1] < num_users-1 else -1
-        
-        return [input_users, input_items], label_ratings, next_batch_index
             
     
     def train_data_batch_generator(self):
         num_users = len(self.user_map)
+        num_items = len(self.item_map)
         users_list = list(range(num_users))
         user_batches = [users_list[i:i+self.batch_size] for i in range(0, num_users, self.batch_size)]
 
         ratings_by_user = self.train_data['ratings_by_user']
+        user_negative_items_dict = self.train_data['user_negative_items_dict']
         for user_batch in user_batches:
             input_users = []
             input_items = []
@@ -161,6 +159,13 @@ class DataModule:
                     input_users.append(user)
                     input_items.append(item_rating[0])
                     label_ratings.append(item_rating[1])
+                
+                # add negative data points
+                user_negative_items = user_negative_items_dict[user]
+                for item in user_negative_items:
+                    input_users.append(user)
+                    input_items.append(item)
+                    label_ratings.append(0)
 
             input_users = np.reshape(np.array(input_users).astype(np.int64), [-1,1])
             input_items = np.reshape(np.array(input_items).astype(np.int64), [-1,1])
@@ -169,28 +174,34 @@ class DataModule:
 
             yield input_users, input_items, label_ratings
             
-    def get_validation_data(self):
+    def get_validation_data(self):  # sourcery skip: class-extract-method
         ratings_by_user = self.validation_data['ratings_by_user']
         input_users = []
         input_items = []
         label_ratings = []
-        user_index_dict = defaultdict(list)
-        index_counter = 0
+
+        user_negative_items_dict = self.train_data['user_negative_items_dict']
         for user, item_ratings in ratings_by_user.items():
             for item_rating in item_ratings:
                 input_users.append(user)
                 input_items.append(item_rating[0])
                 label_ratings.append(item_rating[1])
-                user_index_dict[user].append(index_counter)
-                index_counter += 1
+
+            # add negative data points
+            user_negative_items = user_negative_items_dict[user]
+            for item in user_negative_items:
+                input_users.append(user)
+                input_items.append(item)
+                label_ratings.append(0)
+
                 
         input_users = np.reshape(np.array(input_users).astype(np.int64), [-1,1])
         input_items = np.reshape(np.array(input_items).astype(np.int64), [-1,1])
         label_ratings = np.reshape(np.array(label_ratings).astype(np.float32), [-1,1])
 
-        return input_users, input_items, label_ratings, user_index_dict
+        return input_users, input_items, label_ratings
     
-    def get_test_data(self):
+    def get_test_data_positive(self):
         ratings_by_user = self.test_data['ratings_by_user']
         input_users = []
         input_items = []
@@ -210,3 +221,27 @@ class DataModule:
         label_ratings = np.reshape(np.array(label_ratings).astype(np.float32), [-1,1])
 
         return input_users, input_items, label_ratings, user_index_dict
+    
+    def get_test_data_negative(self):
+        user_negative_items_dict = self.test_data['user_negative_items_dict']
+        users_list = list(user_negative_items_dict.keys())
+        user_batches = [users_list[i:i+self.batch_size] for i in range(0, len(users_list), self.batch_size)]
+
+        
+        for user_batch in user_batches:
+            input_users = []
+            input_items = []
+            for user in user_batch:
+                if user not in user_negative_items_dict:
+                    continue
+                # add negative data points
+                user_negative_items = user_negative_items_dict[user]
+                for item in user_negative_items:
+                    input_users.append(user)
+                    input_items.append(item)
+
+            input_users = np.reshape(np.array(input_users).astype(np.int64), [-1,1])
+            input_items = np.reshape(np.array(input_items).astype(np.int64), [-1,1])
+
+
+            yield input_users, input_items, user_batch
