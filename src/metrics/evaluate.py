@@ -40,13 +40,28 @@ def evaluate_hit_rate_and_ndcg(user_index_dict, true_scores, predict_scores, top
 
 
 def get_dcg(idx):
-    return math.log(2) / math.log(idx+2)
+    return 1 / math.log2(idx+2)
 
 def get_idcg(length):
     idcg = 0.0
     for i in range(length):
-        idcg += math.log(2)/math.log(i+2)
+        idcg += math.log(2)/math.log2(i+2)
     return idcg
+
+def normalizedDiscountedCumulativeGain(result, sorted_result): 
+    dcg = discountedCumulativeGain(result)
+    idcg = discountedCumulativeGain(sorted_result)
+    return 0 if idcg == 0 else dcg / idcg
+
+def discountedCumulativeGain(result):
+    dcg = []
+    for idx, val in enumerate(result): 
+        numerator = 2**val - 1
+        # add 2 because python 0-index
+        denominator =  np.log2(idx + 2) 
+        score = numerator/denominator
+        dcg.append(score)
+    return sum(dcg)
 
 def evaluate_hit_rate_and_ndcg_2(user_index_dict, positive_ratings, negative_ratings_user_dict, top_k=5):
     
@@ -62,18 +77,25 @@ def evaluate_hit_rate_and_ndcg_2(user_index_dict, positive_ratings, negative_rat
         
         sort_index = np.argsort(user_all_predict_ratings)[::-1]
         
-        tmp_user_hr_list = []
-        tmp_user_dcg_list = []
+        # tmp_user_hr_list = []
+        # tmp_user_dcg_list = []
+        # for idx in range(top_k):
+        #     rank = sort_index[idx]
+        #     if rank >= user_positive_ratings_length: continue
+        #     tmp_user_hr_list.append(1.0)
+        #     tmp_user_dcg_list.append(get_dcg(idx))
+        
+        # idcg_val = get_idcg(target_length)
+        relevance_score = []
         for idx in range(top_k):
             rank = sort_index[idx]
-            if rank >= user_positive_ratings_length: continue
-            tmp_user_hr_list.append(1.0)
-            tmp_user_dcg_list.append(get_dcg(idx))
+            if rank < user_positive_ratings_length:
+                relevance_score.append(1)
+            else:
+                relevance_score.append(0)
         
-        idcg_val = get_idcg(target_length)
-        
-        user_hit_rates.append(np.sum(tmp_user_hr_list)/ target_length)
-        user_ndcg_values.append(np.sum(tmp_user_dcg_list)/ idcg_val)
+        user_hit_rates.append(np.sum(relevance_score)/ target_length)
+        user_ndcg_values.append(normalizedDiscountedCumulativeGain(relevance_score, sorted(relevance_score, reverse=True)))
     
     return np.mean(user_hit_rates), np.mean(user_ndcg_values)
                 

@@ -1,3 +1,4 @@
+import argparse
 import gc
 import logging
 import logging.config
@@ -31,8 +32,8 @@ def setup_logging():
     )
     
 
-fp = open("memory_reports/main.log", "w+")
-from memory_profiler import profile
+# fp = open("memory_reports/main.log", "w+")
+# from memory_profiler import profile
 
 
 # @profile(stream=fp)
@@ -63,23 +64,35 @@ def train_epoch(epoch, model, optimizer, epoch_loss_avg, data_module):
 
 # @profile(stream=fp)
 def main():
+    
+    # Training settings
+    parser = argparse.ArgumentParser(description='Social Recommendation: GraphRec model')
+    parser.add_argument('--model_name', type=str, default="DiffnetPlusMod", metavar='N', help='Model')
+    parser.add_argument('--batch_size', type=int, default=512, metavar='N', help='input batch size for training')
+    parser.add_argument('--dims', type=int, default=64, metavar='N', help='embedding size')
+    parser.add_argument('--lr', type=float, default=0.0005, metavar='LR', help='learning rate')
+    parser.add_argument('--gcn_layers', type=int, default=2, metavar='N', help='GCN layers')
+    parser.add_argument('--epochs', type=int, default=100, metavar='N', help='number of epochs to train')
+    parser.add_argument('--num_negatives', type=int, default=8, metavar='N', help='number negative ratings in train')
+    parser.add_argument('--num_evaluate', type=int, default=1000, metavar='N', help='number of false positive ratings in test for evaluation')
+    args = parser.parse_args()
+    
     ## hyperparameter
-    dims=64
-    gcn_layers = 3
-    epochs=500
-    batch_size=512
-    top_k=5
-    num_negatives=8
-    num_evaluate=1000
-    learning_rate=0.005
+    dims=args.dims
+    gcn_layers = args.gcn_layers
+    epochs=args.epochs
+    batch_size=args.batch_size
+    num_negatives=args.num_negatives
+    num_evaluate=args.num_evaluate
+    learning_rate=args.lr
     log = logging.getLogger(__name__)
-    log.info("Diffnet model training started")
 
-    data_dir = "./data/yelp_20"
+    data_dir = "./data/yelp_10"
     if not os.path.isdir(data_dir):
         log.error("Data directory not found")
         sys.exit()
 
+    log.info(f"Current config: dims: {dims} gcn_layers: {gcn_layers} epochs: {epochs} batch_size: {batch_size} num_negatives: {num_negatives} and num_evaluate={num_evaluate} and learning_rate={learning_rate}")
     # load data
     log.info(f"Loading dataset for dir: {data_dir}")
 
@@ -88,17 +101,28 @@ def main():
     log.info("Data loaded successful!!!!!!")
     train_data= data_module.train_data
 
-    model = DiffnetPlusMod(gcn_layers=gcn_layers,
-                        dims=dims,
-                        num_users=len(data_module.user_map),
-                        num_items=len(data_module.item_map),
-                        user_review_embeddings=data_module.user_embeddings,
-                        item_review_embeddings=data_module.item_embeddings,
-                        user_consumed_items=train_data['user_consumed_items'],
-                        item_consumed_users=train_data['item_consumed_items'],
-                        user_links=data_module.user_links,
-                        item_links=data_module.item_links)
-
+    if args.model_name=="DiffnetPlusMod":
+        model = DiffnetPlusMod(gcn_layers=gcn_layers,
+                            dims=dims,
+                            num_users=len(data_module.user_map),
+                            num_items=len(data_module.item_map),
+                            user_review_embeddings=data_module.user_embeddings,
+                            item_review_embeddings=data_module.item_embeddings,
+                            user_consumed_items=train_data['user_consumed_items'],
+                            item_consumed_users=train_data['item_consumed_items'],
+                            user_links=data_module.user_links,
+                            item_links=data_module.item_links)
+    else:
+        model = DiffnetPlus(gcn_layers=gcn_layers,
+                            dims=dims,
+                            num_users=len(data_module.user_map),
+                            num_items=len(data_module.item_map),
+                            user_review_embeddings=data_module.user_embeddings,
+                            item_review_embeddings=data_module.item_embeddings,
+                            user_consumed_items=train_data['user_consumed_items'],
+                            item_consumed_users=train_data['item_consumed_items'],
+                            user_links=data_module.user_links,
+                            item_links=data_module.item_links)
 
     # optimizer
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
@@ -139,15 +163,25 @@ def main():
         hit_rate_10, ndcg_10 = evaluate_hit_rate_and_ndcg_2(test_user_index_dict, test_y_predict.numpy(), test_negative_predictions_user_dict, top_k=10)
         hit_rate_15, ndcg_15 = evaluate_hit_rate_and_ndcg_2(test_user_index_dict, test_y_predict.numpy(), test_negative_predictions_user_dict, top_k=15)
 
+        # rmse
+        # test_predict_and_true = np.concatenate([test_label_ratings, test_y_predict])
+        rmse = tf.keras.metrics.RootMeanSquaredError()
+        rmse.update_state(test_label_ratings, test_y_predict)
+        
+        #mse
+        mse = tf.keras.losses.MeanSquaredError()
+        mse_val = mse(test_label_ratings, test_y_predict).numpy()
+
 
         # # metrics hit_rate and ndcg
         # hit_rate, ndcg = evaluate_hit_rate_and_ndcg(test_user_index_dict, test_label_ratings, test_y_predict, top_k=top_k)
         # log.info(f"Test Loss: {test_loss_avg.result()}  Test HR: {hit_rate} Test NDCG: {ndcg}")
 
-        log.info(f"Epoch: {epoch}: Time Elapsed:{epoch_time} Loss: {epoch_loss_avg.result()} Validation Loss: {validation_loss_avg.result()}  Test loss: {test_loss_avg.result()}")
-        log.info(f"\t Test HR(5): {hit_rate_5}\tTest NDCG(): {ndcg_5}")
-        log.info(f"\t Test HR(10): {hit_rate_10}\tTest NDCG(): {ndcg_10}")
-        log.info(f"\t Test HR(15): {hit_rate_15}\tTest NDCG(): {ndcg_15}")
+        log.info(f"Epoch: {epoch}: Time Elapsed:{epoch_time} Loss: {epoch_loss_avg.result()} Validation Loss: {validation_loss_avg.result()}")
+        log.info(f"Test loss: {test_loss_avg.result()} MSE: {mse_val} RMSE: {rmse.result()}")
+        log.info(f"\t Test HR(5): {hit_rate_5}\tTest NDCG(5): {ndcg_5}")
+        log.info(f"\t Test HR(10): {hit_rate_10}\tTest NDCG(10): {ndcg_10}")
+        log.info(f"\t Test HR(15): {hit_rate_15}\tTest NDCG(15): {ndcg_15}")
 
 if __name__ == "__main__":
     # setup logging

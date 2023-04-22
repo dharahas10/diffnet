@@ -1,13 +1,15 @@
 import logging
 
 import tensorflow as tf
-from memory_profiler import profile
 
 from layers.fusion_layer import FusionLayer
 from util.tf_helper import normalize_with_moments
 
+# from memory_profiler import profile
+
+
 log = logging.getLogger(__name__)
-fp = open("memory_reports/diffnet.log", "w+")
+# fp = open("memory_reports/diffnet.log", "w+")
 
 class DiffnetPlus(tf.keras.Model):
     
@@ -25,7 +27,7 @@ class DiffnetPlus(tf.keras.Model):
         self.item_consumed_users = item_consumed_users
         self.user_links = user_links
         self.item_links = item_links
-        
+        log.info("Selected Model: DiffnetPlus")
         
         ### common variables and layers
         ## variables

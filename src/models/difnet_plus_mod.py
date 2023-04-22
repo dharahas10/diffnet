@@ -7,8 +7,8 @@ from util.tf_helper import normalize_with_moments
 
 log = logging.getLogger(__name__)
 
-fp = open("memory_reports/diffnet_mod.log", "w+")
-from memory_profiler import profile
+# fp = open("memory_reports/diffnet_mod.log", "w+")
+# from memory_profiler import profile
 
 
 class DiffnetPlusMod(tf.keras.Model):
@@ -16,6 +16,7 @@ class DiffnetPlusMod(tf.keras.Model):
     def __init__(self, gcn_layers, dims, num_users, num_items, user_review_embeddings, item_review_embeddings, user_consumed_items, user_links, item_consumed_users, item_links, *args, **kwargs) -> None:
         super(DiffnetPlusMod, self).__init__(*args, **kwargs)
         ## init variables
+        
         self.low_att_std = 1.0
         self.dims = dims
         self.gcn_layers = gcn_layers
@@ -27,7 +28,7 @@ class DiffnetPlusMod(tf.keras.Model):
         self.item_consumed_users = item_consumed_users
         self.user_links = user_links
         self.item_links = item_links
-        
+        log.info("Selected Model: DiffnetPlusMod")
         #### user related variables and layers
         ### describe variables
         ## node attention
@@ -36,7 +37,9 @@ class DiffnetPlusMod(tf.keras.Model):
             tf.random_normal_initializer(stddev=self.low_att_std)(shape=[len(self.user_consumed_items['indices'])], dtype=tf.float32),
             trainable=True, name="user_consumed_items_trainable_values_or_weights")
         # neighbor users
-        self.user_neighbors_sparse_values = tf.constant(self.user_links['values'], dtype=tf.float32, shape=[len(self.user_links['values'])], name='user_neighbors_sparse_values')
+        self.user_neighbors_sparse_values = tf.Variable(
+            tf.random_normal_initializer(stddev=self.low_att_std)(shape=[len(self.user_links['indices'])], dtype=tf.float32),
+            trainable=True, name="user_neighbors_sparse_values")
         
         ## describe layers
         # reduce dimensions layer
@@ -68,8 +71,9 @@ class DiffnetPlusMod(tf.keras.Model):
             trainable=True, name="item_consumed_users_trainable_values_or_weights")
         
         # neighbor items
-        self.item_neighbors_sparse_values = tf.constant(self.item_links['values'], dtype=tf.float32, shape=[len(self.item_links['values'])], name="item_neighbors_sparse_values")
-        
+        self.item_neighbors_sparse_values = tf.Variable(
+            tf.random_normal_initializer(stddev=self.low_att_std)(shape=[len(self.item_links['indices'])], dtype=tf.float32),
+            trainable=True, name="item_neighbors_sparse_values")
         
         ## describe layers
         
@@ -193,7 +197,7 @@ class DiffnetPlusMod(tf.keras.Model):
             item_neighbors_graph_attention_embeddings = tf.concat([current_item_gcn_embeddings, item_embeddings_from_item_links], 1)
             item_neighbors_graph_attention_embeddings = self.item_neighbors_graph_attention_layer_1(item_neighbors_graph_attention_embeddings)
             item_neighbors_graph_attention_embeddings = self.item_neighbors_graph_attention_layer_2(item_neighbors_graph_attention_embeddings)
-            item_neighbors_graph_attention_embeddings = tf.math.exp(item_neighbors_graph_attention_embeddings) + 0.3 # TODO try removing bias factor
+            item_neighbors_graph_attention_embeddings = tf.math.exp(item_neighbors_graph_attention_embeddings) + 0.5 # TODO try removing bias factor
             
             
             # item consumed users embeddings
@@ -213,7 +217,7 @@ class DiffnetPlusMod(tf.keras.Model):
             item_consumed_users_graph_attention_embeddings = tf.concat([current_item_gcn_embeddings, item_embeddings_from_consumed_users], 1)
             item_consumed_users_graph_attention_embeddings = self.item_consumed_users_graph_attention_layer_1(item_consumed_users_graph_attention_embeddings)
             item_consumed_users_graph_attention_embeddings = self.item_consumed_users_graph_attention_layer_2(item_consumed_users_graph_attention_embeddings)
-            item_consumed_users_graph_attention_embeddings = tf.math.exp(item_consumed_users_graph_attention_embeddings) + 0.7 # TODO check bias weight later
+            item_consumed_users_graph_attention_embeddings = tf.math.exp(item_consumed_users_graph_attention_embeddings) + 0.5 # TODO check bias weight later
             
             # compute weight/factor for consumed_users and items
             item_total_attention_embeddings = item_neighbors_graph_attention_embeddings + item_consumed_users_graph_attention_embeddings
