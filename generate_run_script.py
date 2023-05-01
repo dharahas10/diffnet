@@ -1,13 +1,13 @@
 import itertools
 
 model_name = ["DiffnetPlusMod", "DiffnetPlus"]
-dims = [32, 64, 128]
-batch_size = [100, 250, 500, 1000]
-lr = [0.001, 0.0025, 0.005, 0.0001]
-gcn = [2, 3, 4]
-neg = [8, 10]
-evals = [1000, 500]
-epochs = [500]
+dims = [32, 64]
+batch_size = [500]
+lr = [0.001, 0.0025, 0.005]
+gcn = [2, 3]
+neg = [10]
+evals = [1000]
+epochs = [100]
 
 
 with open("./run_script.sh", "w") as f:
