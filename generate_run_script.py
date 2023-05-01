@@ -1,9 +1,9 @@
 import itertools
 
-model_name = ["DiffnetPlusMod", "DiffnetPlus"]
-dims = [32, 64]
+model_name = ["DiffnetPlusMod"]
+dims = [64]
 batch_size = [500]
-lr = [0.001, 0.0025, 0.005]
+lr = [0.0025, 0.0005]
 gcn = [2, 3]
 neg = [10]
 evals = [1000]
