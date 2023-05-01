@@ -1,4 +1,5 @@
 import argparse
+import json
 import logging
 import logging.config
 import os
@@ -73,7 +74,7 @@ def main():
     parser.add_argument("--dims", type=int, default=64, metavar="N", help="embedding size")
     parser.add_argument("--lr", type=float, default=0.0005, metavar="LR", help="learning rate")
     parser.add_argument("--gcn_layers", type=int, default=2, metavar="N", help="GCN layers")
-    parser.add_argument("--epochs", type=int, default=100, metavar="N", help="number of epochs to train")
+    parser.add_argument("--epochs", type=int, default=1, metavar="N", help="number of epochs to train")
     parser.add_argument(
         "--num_negatives",
         type=int,
@@ -98,12 +99,27 @@ def main():
     num_negatives = args.num_negatives
     num_evaluate = args.num_evaluate
     learning_rate = args.lr
+
+    # results
+    final_info = {}
+    final_info["hyperparameters"] = {
+        "dims": args.dims,
+        "gcn_layers": args.gcn_layers,
+        "epochs": args.epochs,
+        "batch_size": args.batch_size,
+        "num_negatives": args.num_negatives,
+        "num_evaluate": args.num_evaluate,
+        "learning_rate": args.lr,
+    }
+
     log = logging.getLogger(__name__)
 
     data_dir = "./data/yelp_10"
     if not os.path.isdir(data_dir):
         log.error("Data directory not found")
         sys.exit()
+
+    final_info["data_dir"] = data_dir
 
     log.info(
         f"Current config: dims: {dims} gcn_layers: {gcn_layers} epochs: {epochs} batch_size: {batch_size} num_negatives: {num_negatives} and num_evaluate={num_evaluate} and learning_rate={learning_rate}"
@@ -122,6 +138,7 @@ def main():
     train_data = data_module.train_data
 
     if args.model_name == "DiffnetPlusMod":
+        final_info["model"] = "DiffnetPlusMod"
         model = DiffnetPlusMod(
             gcn_layers=gcn_layers,
             dims=dims,
@@ -135,6 +152,7 @@ def main():
             item_links=data_module.item_links,
         )
     else:
+        final_info["model"] = "DiffnetPlus"
         model = DiffnetPlus(
             gcn_layers=gcn_layers,
             dims=dims,
@@ -152,7 +170,9 @@ def main():
     optimizer = tf.keras.optimizers.Adam(learning_rate=learning_rate)
 
     ## train the model
+    final_info["epoch"] = list()
     for epoch in range(1, epochs + 1):
+        epoch_info = {}
         epoch_loss_avg = tf.keras.metrics.Mean()
         start_time = time.time()
         train_epoch(epoch, model, optimizer, epoch_loss_avg, data_module)  # type: ignore
@@ -226,12 +246,31 @@ def main():
         # # metrics hit_rate and ndcg
         # hit_rate, ndcg = evaluate_hit_rate_and_ndcg(test_user_index_dict, test_label_ratings, test_y_predict, top_k=top_k)
         # log.info(f"Test Loss: {test_loss_avg.result()}  Test HR: {hit_rate} Test NDCG: {ndcg}")
-
+        epoch_info["time"] = epoch_time
+        epoch_info["train_loss"] = float(epoch_loss_avg.result().numpy())
+        epoch_info["val_loss"] = float(validation_loss_avg.result().numpy())
+        epoch_info["test_loss"] = float(test_loss_avg.result().numpy())
+        epoch_info["mse"] = float(mse_val)
+        epoch_info["rmse"] = float(rmse.result().numpy())
+        epoch_info["hr_5"] = float(hit_rate_5)
+        epoch_info["hr_10"] = float(hit_rate_10)
+        epoch_info["hr_15"] = float(hit_rate_15)
+        epoch_info["ndcg_5"] = float(ndcg_5)
+        epoch_info["ndcg_10"] = float(ndcg_10)
+        epoch_info["ndcg_15"] = float(ndcg_15)
         log.info(f"Epoch: {epoch}: Time Elapsed:{epoch_time} Loss: {epoch_loss_avg.result()} Validation Loss: {validation_loss_avg.result()}")
         log.info(f"Test loss: {test_loss_avg.result()} MSE: {mse_val} RMSE: {rmse.result()}")
         log.info(f"\t Test HR(5): {hit_rate_5}\tTest NDCG(5): {ndcg_5}")
         log.info(f"\t Test HR(10): {hit_rate_10}\tTest NDCG(10): {ndcg_10}")
         log.info(f"\t Test HR(15): {hit_rate_15}\tTest NDCG(15): {ndcg_15}")
+
+        final_info["epoch"].append(epoch_info)
+
+    if not os.path.isdir("./out"):
+        os.makedirs("./out")
+
+    with open(f"./out/{final_info['model']}_dims{dims}_gcn{gcn_layers}_epochs{epochs}_batch{batch_size}_neg{num_negatives}_eval{num_evaluate}_lr{learning_rate}.json", "w") as f:
+        json.dump(final_info, f)
 
 
 if __name__ == "__main__":
