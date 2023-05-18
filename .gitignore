@@ -16,8 +16,8 @@ __pycache__
 
 # project
 /data
-logs
+logs*
 
 src/test.py
 memory_reports
-out
+out*

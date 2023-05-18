@@ -1,6 +1,6 @@
 import itertools
 
-model_name = ["DiffnetPlusMod"]
+model_name = ["DiffnetPlus"]
 dims = [64]
 batch_size = [500]
 lr = [0.0025, 0.0005]
