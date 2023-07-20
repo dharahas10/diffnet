@@ -1,6 +1,5 @@
 import json
 import os
-from cProfile import label
 from pprint import pprint
 
 import matplotlib.pyplot as plt
@@ -29,7 +28,7 @@ def plot_training_loss(results: list, model):
         if model == "DiffnetPlus":
             result_label = f'Diffnet++_gcn={hyperparameters["gcn_layers"]}_lr={hyperparameters["learning_rate"]}'
         else:
-            result_label = f'Proposed_model_gcn={hyperparameters["gcn_layers"]}_lr={hyperparameters["learning_rate"]}'
+            result_label = f'RelationalNet_model_gcn={hyperparameters["gcn_layers"]}_lr={hyperparameters["learning_rate"]}'
         epochs = result["epoch"]
         training_loss_vals = [e["train_loss"] for e in epochs]
         pprint(training_loss_vals)
